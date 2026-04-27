@@ -21,10 +21,13 @@ GLFWWindow::GLFWWindow(int width, int height, const char* title)
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_SAMPLES, 4); // Enable 4x MSAA
 
     // ── Step 2: Create the Window ────────────────────────────────
-    handle = glfwCreateWindow(width, height, title,
-                              nullptr,   // monitor (nullptr = windowed)
+    GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+    const GLFWvidmode* mode = glfwGetVideoMode(monitor);
+    handle = glfwCreateWindow(mode->width, mode->height, title,
+                              monitor,   // monitor (non-null = fullscreen)
                               nullptr);  // share context
     if (!handle) {
         std::cerr << "ERROR: glfwCreateWindow() failed\n";
@@ -46,12 +49,21 @@ GLFWWindow::GLFWWindow(int width, int height, const char* title)
     }
 
     // Tell OpenGL the pixel dimensions of the rendering area.
-    glViewport(0, 0, width, height);
+    int fbWidth, fbHeight;
+    glfwGetFramebufferSize(handle, &fbWidth, &fbHeight);
+    glViewport(0, 0, fbWidth, fbHeight);
+    
+    // Update global variables for orthographic projection and logic
+    SCR_WIDTH = mode->width;
+    SCR_HEIGHT = mode->height;
 
     // Enable depth testing: objects closer to the camera occlude
     // objects further away.  Without this everything draws in order,
     // which looks wrong in 3D.
     glEnable(GL_DEPTH_TEST);
+    
+    // Enable Multisample Anti-Aliasing (MSAA)
+    glEnable(GL_MULTISAMPLE);
 
     // Enable alpha blending (needed for transparent HUD overlays).
     // src color * src_alpha + dst color * (1 - src_alpha)

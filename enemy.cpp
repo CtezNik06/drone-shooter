@@ -101,11 +101,11 @@ void EnemyManager::spawnEnemy(EnemyType type)
         e.hp    = SCOUT_HP;
         e.maxHp = SCOUT_HP;
         // Speed scales up with wave (faster in later waves)
-        e.speed = SCOUT_SPEED + (waveNumber - 1) * 0.3f;
+        e.speed = SCOUT_SPEED + (waveNumber - 1) * 0.15f;
     } else {
         e.hp    = HEAVY_HP;
         e.maxHp = HEAVY_HP;
-        e.speed = HEAVY_SPEED + (waveNumber - 1) * 0.15f;
+        e.speed = HEAVY_SPEED + (waveNumber - 1) * 0.08f;
     }
 
     updateBBox(e);

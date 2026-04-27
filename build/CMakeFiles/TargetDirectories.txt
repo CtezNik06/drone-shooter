@@ -1,3 +1,3 @@
-/home/nikhil/opengl-drone-shooter/simple/build/CMakeFiles/DroneShooterSimple.dir
-/home/nikhil/opengl-drone-shooter/simple/build/CMakeFiles/edit_cache.dir
-/home/nikhil/opengl-drone-shooter/simple/build/CMakeFiles/rebuild_cache.dir
+/Users/tanushv/cg/drone-shooter/build/CMakeFiles/DroneShooterSimple.dir
+/Users/tanushv/cg/drone-shooter/build/CMakeFiles/edit_cache.dir
+/Users/tanushv/cg/drone-shooter/build/CMakeFiles/rebuild_cache.dir

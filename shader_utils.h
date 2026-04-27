@@ -30,7 +30,9 @@ static const char* VERT_SRC = R"glsl(
 #version 330 core
 layout(location = 0) in vec3 aPos;   // input: one vertex position
 uniform mat4 MVP;                     // Model × View × Projection
+out vec3 WorldPos;
 void main() {
+    WorldPos = aPos;
     gl_Position = MVP * vec4(aPos, 1.0);
 }
 )glsl";
@@ -39,9 +41,35 @@ void main() {
 static const char* FRAG_SRC = R"glsl(
 #version 330 core
 uniform vec4 uColor;       // RGBA color — set from C++ each draw call
+in vec3 WorldPos;
 out vec4 FragColor;
 void main() {
-    FragColor = uColor;
+    vec4 finalColor = uColor;
+    
+    // Check if this is the ground (heuristic: y is near -0.05)
+    if (abs(WorldPos.y - (-0.05)) < 0.01 && uColor.g > 0.4 && uColor.r < 0.3) {
+        // Create a grid pattern
+        bool gridX = mod(WorldPos.x + 1000.0, 2.0) < 0.1;
+        bool gridZ = mod(WorldPos.z + 1000.0, 2.0) < 0.1;
+        if (gridX || gridZ) {
+            finalColor.rgb *= 0.8; // darken grid lines
+        }
+    }
+    
+    // Add depth fog to blend into the horizon
+    float depth = gl_FragCoord.z / gl_FragCoord.w;
+    float fogFactor = exp(-pow(depth * 0.025, 2.0));
+    fogFactor = clamp(fogFactor, 0.0, 1.0);
+    
+    // Sky color roughly matches glClearColor in main.cpp
+    vec3 skyColor = vec3(0.53, 0.81, 0.98);
+    
+    // Only apply fog to opaque objects to avoid fogging HUD
+    if (uColor.a > 0.99) {
+        finalColor.rgb = mix(skyColor, finalColor.rgb, fogFactor);
+    }
+    
+    FragColor = finalColor;
 }
 )glsl";
 
