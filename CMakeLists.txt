@@ -3,6 +3,7 @@ project(DroneShooterSimple)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # ── Source files (one per team member + shared) ──────────────────
 set(SOURCES
@@ -29,13 +30,23 @@ link_directories   (${GLFW_LIBRARY_DIRS})
 # ── Build the executable ─────────────────────────────────────────
 add_executable(DroneShooterSimple ${SOURCES})
 
-target_link_libraries(DroneShooterSimple
-    ${GLFW_LIBRARIES}
-    GL      # OpenGL itself
-    X11     # X11 window system (Linux/WSL)
-    pthread # POSIX threads (needed by GLFW)
-    dl      # dynamic library loader (needed by GLAD)
-)
+if(APPLE)
+    target_link_libraries(DroneShooterSimple
+        ${GLFW_LIBRARIES}
+        "-framework OpenGL"
+        "-framework Cocoa"
+        "-framework IOKit"
+        "-framework CoreVideo"
+    )
+else()
+    target_link_libraries(DroneShooterSimple
+        ${GLFW_LIBRARIES}
+        GL      # OpenGL itself
+        X11     # X11 window system (Linux/WSL)
+        pthread # POSIX threads (needed by GLFW)
+        dl      # dynamic library loader (needed by GLAD)
+    )
+endif()
 
 # ── Output the binary to the simple/ directory ───────────────────
 set_target_properties(DroneShooterSimple PROPERTIES

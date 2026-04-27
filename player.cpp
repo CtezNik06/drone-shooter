@@ -11,6 +11,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>   // std::clamp
 #include <cmath>       // sin, cos
+#include <cstdlib>     // system
 
 // ── Constructor ─────────────────────────────────────────────────
 Player::Player()
@@ -161,6 +162,7 @@ void Player::processInput(GLFWwindow* win, float dt)
             shotCooldown  = SHOT_COOLDOWN; // start cooldown timer
             muzzleFlash   = true;          // trigger flash effect
             flashTimer    = 0.08f;         // flash lasts 0.08 seconds
+            system("afplay /System/Library/Sounds/Ping.aiff &");
         }
     }
 

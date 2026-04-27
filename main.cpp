@@ -13,6 +13,8 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <GLFW/glfw3.h>
 #include <iostream>
+#include <cstdlib>
+#include <string>
 
 // ── Ground Quad ──────────────────────────────────────────────────
 static unsigned int g_groundVAO = 0, g_groundVBO = 0;
@@ -110,6 +112,8 @@ int main()
               << "  R         Reload   |  ESC    Quit\n"
               << "  ENTER     Start / Restart\n"
               << "================================\n\n";
+              
+    system("say 'Welcome to Drone Shooter. Use WASD to move, Space to shoot, and Enter to start' &");
 
     while (!win.shouldClose())
     {
@@ -154,6 +158,9 @@ int main()
                 state      = GameState::WAVE_END;
                 wavePauseT = 0.0f;
                 bannerShown = true;
+                
+                std::string cmd = "say 'Wave complete. Score: " + std::to_string(player.score) + "' &";
+                system(cmd.c_str());
             }
 
             // Check game over
