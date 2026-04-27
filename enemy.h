@@ -1,96 +1,109 @@
 #pragma once
 
 // ================================================================
-// MEMBER 3: enemy.h  —  Enemy (Drone Shape, Movement, Laser)
-// ================================================================
-// YOUR JOB:
-//   • Spawn drones at random positions around the player
-//   • Move each drone toward the player every frame
-//   • Every ENEMY_ATTACK_INT seconds, fire a laser at the player
-//   • Draw each drone as a 3D box (cube) using OpenGL
-//   • Draw the laser as a thin stretched box pointing at the player
-//
-// KEY CONCEPTS TO EXPLAIN (when presenting):
-//   1. Model Matrix — positions/rotates/scales a shape in the world.
-//      The CUBE geometry is centered at origin.  We translate it
-//      to the enemy's world position, then scale it to the right size.
-//      model = translate(identity, pos) × scale(identity, size)
-//
-//   2. MVP = Projection × View × Model
-//      This is the FINAL matrix we pass to the vertex shader.
-//      It converts each vertex: local space → world → camera → screen.
-//
-//   3. Simple Enemy AI — direction vector from enemy to player:
-//        dir = normalize(playerPos - enemyPos)
-//        enemyPos += dir * speed * dt
-//      No pathfinding needed — straight-line movement is enough.
-//
-//   4. Laser Direction — normalized vector from enemy to player.
-//      Member 4 (collision) uses this ray same vector.
+// MEMBER 3 (UPGRADED): enemy.h
+// NEW FEATURES:
+//   • Two enemy types: SCOUT (fast, 1HP) and HEAVY (slow, 3HP)
+//   • Enemy HP system — heavy drones need 3 hits to kill
+//   • Wave system — enemies get harder each wave
+//   • Rotor animation — spinning parts on each drone
+//   • HP bar — each drone shows its remaining health above it
+//   • Score returned on kill (Scout=100, Heavy=300)
 // ================================================================
 
 #include <glad/glad.h>
 #include <glm/glm.hpp>
 #include <vector>
 
-// ── A single drone enemy ────────────────────────────────────────
-struct Enemy {
-    glm::vec3 position;    // World position of the drone
-    glm::vec3 bboxMin;     // AABB minimum corner (used by collision)
-    glm::vec3 bboxMax;     // AABB maximum corner
-    glm::vec3 laserDir;    // Normalized direction of the laser beam
-    bool      active;      // true = alive and flying
-    bool      laserActive; // true = laser beam visible this frame
-    bool      canDamage;   // true = laser can hurt player this frame
-    float     attackTimer; // Time since last attack (seconds)
-    float     respawnTimer;// Time since death (used to respawn)
+// ── Enemy type enum ─────────────────────────────────────────────
+enum class EnemyType {
+    SCOUT,  // fast, 1 HP, cyan,  small  (0.8 × 0.3 × 0.8)
+    HEAVY   // slow, 3 HP, red,   large  (1.4 × 0.6 × 1.4)
 };
 
-// ── Manages all enemies (spawn, update, draw) ───────────────────
+// ── A single drone enemy ────────────────────────────────────────
+struct Enemy {
+    glm::vec3  position;     // World position
+    glm::vec3  bboxMin;      // AABB minimum (read by Member 4)
+    glm::vec3  bboxMax;      // AABB maximum (read by Member 4)
+    glm::vec3  laserDir;     // Normalized laser direction
+    EnemyType  type;         // SCOUT or HEAVY
+    int        hp;           // Current hit points
+    int        maxHp;        // Maximum hit points (1 or 3)
+    float      speed;        // Movement speed for this drone
+    bool       active;       // false = dead / waiting to respawn
+    bool       laserActive;  // true = laser visible this frame
+    bool       canDamage;    // true = laser can hurt player
+    float      attackTimer;  // time since last attack
+    float      respawnTimer; // time dead (for respawn logic)
+};
+
+// ── Manages all enemies + the wave system ───────────────────────
 class EnemyManager {
 public:
-    std::vector<Enemy> enemies;  // The list of all drones
+    std::vector<Enemy> enemies;
+
+    // ── Wave tracking (NEW) ──────────────────────────────────────
+    int   waveNumber;       // current wave (starts at 1)
+    bool  waveComplete;     // true when all enemies this wave are dead
 
     EnemyManager();
     ~EnemyManager();
 
-    // Spawn initial enemies, update movement + attack, then draw.
-    // Call once per frame with the player's current world position.
-    void update(const glm::vec3& playerPos, float dt);
-    void draw  (unsigned int shader,
-                const glm::mat4& view,
-                const glm::mat4& proj);
+    // Update enemy movement, attack timers, respawn logic.
+    // time = total elapsed seconds (for rotor animation).
+    void update(const glm::vec3& playerPos, float dt, float time);
 
-    // Reset for a new game (called when player restarts)
-    void reset();
+    // Draw all active enemies (bodies, rotors, lasers, HP bars).
+    void draw(unsigned int shader,
+              const glm::mat4& view,
+              const glm::mat4& proj,
+              const glm::mat4& ortho);
 
-    // Rebuild bounding box around enemy — called each frame.
-    // MEMBER 4 reads bboxMin / bboxMax for collision testing.
+    // Hit an enemy — reduces HP. Returns score awarded (0 if still alive).
+    // Called by Member 4 (CollisionDetector).
+    int  hitEnemy(Enemy& e);
+
+    // Start the next wave — spawn fresh enemies matching waveNumber.
+    void startNextWave();
+
+    // Rebuild AABB (call each frame; Member 4 reads these).
     static void updateBBox(Enemy& e);
 
+    // Reset for a new game.
+    void reset();
+
+    // Returns true when every enemy in the current wave isDead.
+    bool allDead() const;
+
 private:
-    unsigned int m_cubeVAO, m_cubeVBO;    // Drone body geometry
-    unsigned int m_laserVAO, m_laserVBO;  // Laser beam geometry
+    unsigned int m_cubeVAO, m_cubeVBO;
+    unsigned int m_laserVAO, m_laserVBO;
 
-    void setupGeometry();    // Upload cube and laser to GPU (called once)
-    void spawnEnemy();       // Add a new active enemy at a random position
+    float m_currentTime; // stored for rotor spin animation
 
-    // Draw one instance of the cube at the given world transform.
-    // r,g,b = colour of this cube
-    void drawCube(unsigned int shader,
-                  const glm::mat4& view,
-                  const glm::mat4& proj,
-                  const glm::vec3& pos,
-                  const glm::vec3& scale,
-                  float r, float g, float b);
-
-    // Draw the laser beam from `from` in the direction `dir`.
-    void drawLaser(unsigned int shader,
-                   const glm::mat4& view,
-                   const glm::mat4& proj,
-                   const glm::vec3& from,
-                   const glm::vec3& dir);
-
-    // Generate a random spawn position (outside the inner safe zone).
+    void setupGeometry();
+    void spawnEnemy(EnemyType type);
     glm::vec3 randomSpawn();
+
+    // Draw one cube instance
+    void drawCube(unsigned int shader,
+                  const glm::mat4& view, const glm::mat4& proj,
+                  const glm::vec3& pos,  const glm::vec3& scale,
+                  float r, float g, float b, float a = 1.0f);
+
+    // Draw the laser beam
+    void drawLaser(unsigned int shader,
+                   const glm::mat4& view, const glm::mat4& proj,
+                   const glm::vec3& from, const glm::vec3& dir);
+
+    // NEW: Draw 4 spinning rotor cubes around the drone body
+    void drawRotors(unsigned int shader,
+                    const glm::mat4& view, const glm::mat4& proj,
+                    const glm::vec3& pos, float bodyRadius, float time);
+
+    // NEW: Draw a health bar projected above the enemy in 2D
+    void drawHPBar(unsigned int shader, const glm::mat4& ortho,
+                   const glm::mat4& view, const glm::mat4& proj,
+                   const Enemy& e);
 };

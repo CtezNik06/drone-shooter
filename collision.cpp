@@ -1,134 +1,122 @@
 // ================================================================
-// MEMBER 4: collision.cpp  —  Collision Detection (Slab Method)
+// MEMBER 4 (UPGRADED): collision.cpp
+// Core algorithm unchanged — integrated with new HP system and score.
 // ================================================================
 
 #include "collision.h"
-#include "game_state.h"   // TERRAIN_SIZE, ENEMY_DAMAGE, etc.
-#include <algorithm>      // std::min, std::max
-#include <cmath>          // std::abs
+#include "game_state.h"
+#include <algorithm>   // std::min, std::max, std::clamp
+#include <cmath>       // std::abs
 
 // ================================================================
-// RAY-AABB INTERSECTION  (the "Slab Method")
+// RAY-AABB INTERSECTION — THE SLAB METHOD
+// (Algorithm is unchanged from the original version)
 //
-// A box can be thought of as the overlap of three infinite "slabs":
-//
-//        |   |          |   |          ---
-//        |   |          |   |           |
-//   -----| B |-----  X  |   | Y    --- Z ---
-//        |   |          |   |           |
-//        |   |          |   |          ---
-//
-// For each axis (X, Y, Z) we find the two values of t where the
-// ray crosses that slab's walls.
-//
-// Entry into the box = max of all three entry t values.
-// Exit  from the box = min of all three exit  t values.
-//
-// If entry <= exit, and exit >= 0, and entry <= maxRange → HIT!
+// For each of the 3 axes (X, Y, Z):
+//   t_near = (slab_min - ray_origin) / ray_direction
+//   t_far  = (slab_max - ray_origin) / ray_direction
+// tEnter = max of all t_near values
+// tExit  = min of all t_far values
+// HIT if tEnter <= tExit and tExit >= 0 and tEnter <= maxDist
 // ================================================================
-
 bool CollisionDetector::rayHitsAABB(const Ray& ray,
                                      const AABB& box,
                                      float maxDist) const
 {
-    float tEnter = 0.0f;        // largest  entry t across all axes
-    float tExit  = maxDist;     // smallest exit  t across all axes
+    float tEnter = 0.0f;
+    float tExit  = maxDist;
 
-    for (int axis = 0; axis < 3; ++axis)
-    {
-        float o   = ray.origin   [axis];
-        float d   = ray.direction[axis];
+    for (int axis = 0; axis < 3; ++axis) {
+        float o    = ray.origin   [axis];
+        float d    = ray.direction[axis];
         float bMin = box.minCorner[axis];
         float bMax = box.maxCorner[axis];
 
         if (std::abs(d) < 1e-8f) {
-            // Ray is parallel to this slab.
-            // If origin is outside the slab → no intersection possible.
-            if (o < bMin || o > bMax)
-                return false;
-            // Otherwise the ray travels inside this slab for its whole length;
-            // skip this axis (contributing t = ±infinity).
+            if (o < bMin || o > bMax) return false;
         } else {
-            // Compute intersections with the two slab planes for this axis.
-            // t = (plane_position - origin) / direction
             float t1 = (bMin - o) / d;
             float t2 = (bMax - o) / d;
-
-            // Make sure t1 is the near intersection, t2 the far one.
             if (t1 > t2) std::swap(t1, t2);
-
-            // Shrink the [tEnter, tExit] interval to the intersection of
-            // all three slabs.
             tEnter = std::max(tEnter, t1);
             tExit  = std::min(tExit,  t2);
-
-            // Early exit: if the interval collapsed, no intersection.
-            if (tEnter > tExit)
-                return false;
+            if (tEnter > tExit) return false;
         }
     }
-
-    // tExit >= 0 ensures the box is in front of the ray, not behind it.
     return tExit >= 0.0f;
 }
 
-// ── Main detection function — called from main.cpp every frame ───
-void CollisionDetector::detect(Player& player, EnemyManager& enemies)
+// ── Main detect — call every frame ──────────────────────────────
+// Returns total score earned this frame.
+int CollisionDetector::detect(Player& player, EnemyManager& enemies)
 {
-    // Only test player bullet if they fired this frame
-    if (player.shot)
-        checkPlayerBullet(player, enemies);
+    int scoreGained = 0;
 
-    // Always check enemy lasers (they might be active)
+    if (player.shot)
+        scoreGained += checkPlayerBullet(player, enemies);
+
     checkEnemyLasers(player, enemies);
+    return scoreGained;
 }
 
-// ── Player Bullet (ray from player along camera front vector) ─────
-void CollisionDetector::checkPlayerBullet(Player& player,
-                                           EnemyManager& enemies)
+// ── Player Bullet ────────────────────────────────────────────────
+// NEW: Calls enemies.hitEnemy() which decrements HP and returns
+// score only when the enemy actually dies.  Heavy drones survive
+// 3 hits before awarding score.
+int CollisionDetector::checkPlayerBullet(Player& player,
+                                          EnemyManager& enemies)
 {
-    // Bullet = ray starting at player's eye, going in the direction
-    // the player is looking.
+    int total = 0;
     Ray bullet(player.position, player.front);
 
     for (auto& e : enemies.enemies) {
         if (!e.active) continue;
 
-        // Build AABB from the enemy's current bounding box
         AABB box(e.bboxMin, e.bboxMax);
-
-        // Test the bullet ray against this enemy's box
         if (rayHitsAABB(bullet, box, player.range)) {
-            // Hit! Kill the enemy and award a kill.
-            e.active      = false;
-            e.laserActive = false;
-            e.canDamage   = false;
-            player.kills++;
+            // hitEnemy() reduces HP by 1 and returns score if killed
+            int gained = enemies.hitEnemy(e);
+            if (gained > 0) {
+                player.kills++;               // increment kill count
+                player.score += gained;        // add score
+            }
+            total += gained;
+        }
+    }
+    return total;
+}
+
+// ── Enemy Laser vs Player ─────────────────────────────────────────
+// NEW: Heavy drones deal HEAVY_DAMAGE instead of regular ENEMY_DAMAGE.
+void CollisionDetector::checkEnemyLasers(Player& player,
+                                          EnemyManager& enemies)
+{
+    AABB playerBox(player.bboxMin, player.bboxMax);
+    float laserRange = TERRAIN_SIZE * 4.0f;
+
+    for (auto& e : enemies.enemies) {
+        if (!e.active || !e.canDamage) continue;
+
+        Ray laser(e.position, e.laserDir);
+        if (rayHitsAABB(laser, playerBox, laserRange)) {
+            // Heavy drones hit harder
+            float dmg = (e.type == EnemyType::HEAVY) ? HEAVY_DAMAGE : ENEMY_DAMAGE;
+            player.takeDamage(dmg);
+            e.canDamage = false;  // one hit per attack cycle
         }
     }
 }
 
-// ── Enemy Laser (ray from each enemy toward the player) ──────────
-void CollisionDetector::checkEnemyLasers(Player& player,
-                                          EnemyManager& enemies)
+// ── Helper: distance to nearest active enemy ─────────────────────
+// Used by HUD to show a danger indicator when enemies are close.
+float CollisionDetector::distToClosestEnemy(const Player& player,
+                                             const EnemyManager& enemies) const
 {
-    // Player bounding box (updated each frame by Player::updateBoundingBox)
-    AABB playerBox(player.bboxMin, player.bboxMax);
-
+    float minDist = 9999.0f;
     for (auto& e : enemies.enemies) {
-        // Only check if the enemy can actually deal damage this frame
-        if (!e.active || !e.canDamage) continue;
-
-        // Laser = ray from enemy center in precomputed laserDir
-        Ray laser(e.position, e.laserDir);
-
-        // Max laser range is large enough to cross the map
-        float laserRange = TERRAIN_SIZE * 4.0f;
-
-        if (rayHitsAABB(laser, playerBox, laserRange)) {
-            // Laser hit the player
-            player.takeDamage(ENEMY_DAMAGE);
-            e.canDamage = false;  // prevent multiple hits per attack
-        }
+        if (!e.active) continue;
+        float d = glm::length(e.position - player.position);
+        if (d < minDist) minDist = d;
     }
+    return minDist;
 }

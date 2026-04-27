@@ -1,5 +1,6 @@
 // ================================================================
-// MEMBER 3: enemy.cpp  —  Enemy (Drone Shape, Movement, Laser)
+// MEMBER 3 (UPGRADED): enemy.cpp
+// NEW: Two enemy types, HP system, waves, rotor animation, HP bars
 // ================================================================
 
 #include "enemy.h"
@@ -8,288 +9,371 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <cmath>
-#include <cstdlib>   // rand()
-#include <ctime>     // time()
+#include <cstdlib>
+#include <ctime>
+#include <algorithm>
 
-// ── Cube vertex data (36 vertices, 6 faces × 2 triangles × 3 verts) ──
-// The cube is centred at the origin, side length = 1.
-// We scale it with the model matrix to set the actual size.
+// ── Unit cube vertices (36 verts, shared for body + rotors + laser) ──
 static const float CUBE_VERTS[] = {
-    // Front face  (z = +0.5)
-    -0.5f, -0.5f,  0.5f,   0.5f, -0.5f,  0.5f,   0.5f,  0.5f,  0.5f,
-     0.5f,  0.5f,  0.5f,  -0.5f,  0.5f,  0.5f,  -0.5f, -0.5f,  0.5f,
-    // Back face   (z = -0.5)
-    -0.5f, -0.5f, -0.5f,   0.5f,  0.5f, -0.5f,   0.5f, -0.5f, -0.5f,
-     0.5f,  0.5f, -0.5f,  -0.5f, -0.5f, -0.5f,  -0.5f,  0.5f, -0.5f,
-    // Left face   (x = -0.5)
-    -0.5f,  0.5f,  0.5f,  -0.5f,  0.5f, -0.5f,  -0.5f, -0.5f, -0.5f,
-    -0.5f, -0.5f, -0.5f,  -0.5f, -0.5f,  0.5f,  -0.5f,  0.5f,  0.5f,
-    // Right face  (x = +0.5)
-     0.5f,  0.5f,  0.5f,   0.5f, -0.5f, -0.5f,   0.5f,  0.5f, -0.5f,
-     0.5f, -0.5f, -0.5f,   0.5f,  0.5f,  0.5f,   0.5f, -0.5f,  0.5f,
-    // Top face    (y = +0.5)
-    -0.5f,  0.5f, -0.5f,   0.5f,  0.5f, -0.5f,   0.5f,  0.5f,  0.5f,
-     0.5f,  0.5f,  0.5f,  -0.5f,  0.5f,  0.5f,  -0.5f,  0.5f, -0.5f,
-    // Bottom face (y = -0.5)
-    -0.5f, -0.5f, -0.5f,   0.5f, -0.5f,  0.5f,   0.5f, -0.5f, -0.5f,
-     0.5f, -0.5f,  0.5f,  -0.5f, -0.5f, -0.5f,  -0.5f, -0.5f,  0.5f,
+    -0.5f,-0.5f, 0.5f,  0.5f,-0.5f, 0.5f,  0.5f, 0.5f, 0.5f,
+     0.5f, 0.5f, 0.5f, -0.5f, 0.5f, 0.5f, -0.5f,-0.5f, 0.5f,
+    -0.5f,-0.5f,-0.5f,  0.5f, 0.5f,-0.5f,  0.5f,-0.5f,-0.5f,
+     0.5f, 0.5f,-0.5f, -0.5f,-0.5f,-0.5f, -0.5f, 0.5f,-0.5f,
+    -0.5f, 0.5f, 0.5f, -0.5f, 0.5f,-0.5f, -0.5f,-0.5f,-0.5f,
+    -0.5f,-0.5f,-0.5f, -0.5f,-0.5f, 0.5f, -0.5f, 0.5f, 0.5f,
+     0.5f, 0.5f, 0.5f,  0.5f,-0.5f,-0.5f,  0.5f, 0.5f,-0.5f,
+     0.5f,-0.5f,-0.5f,  0.5f, 0.5f, 0.5f,  0.5f,-0.5f, 0.5f,
+    -0.5f, 0.5f,-0.5f,  0.5f, 0.5f,-0.5f,  0.5f, 0.5f, 0.5f,
+     0.5f, 0.5f, 0.5f, -0.5f, 0.5f, 0.5f, -0.5f, 0.5f,-0.5f,
+    -0.5f,-0.5f,-0.5f,  0.5f,-0.5f, 0.5f,  0.5f,-0.5f,-0.5f,
+     0.5f,-0.5f, 0.5f, -0.5f,-0.5f,-0.5f, -0.5f,-0.5f, 0.5f,
 };
 
 // ── Constructor ──────────────────────────────────────────────────
 EnemyManager::EnemyManager()
 {
-    srand(static_cast<unsigned int>(time(nullptr)));  // seed random numbers
+    srand(static_cast<unsigned int>(time(nullptr)));
+    waveNumber    = 0;
+    waveComplete  = false;
+    m_currentTime = 0.0f;
     setupGeometry();
-
-    // Spawn initial enemies
-    enemies.clear();
-    for (int i = 0; i < MAX_ENEMIES; ++i)
-        spawnEnemy();
+    startNextWave();   // Start wave 1
 }
 
 EnemyManager::~EnemyManager()
 {
-    glDeleteVertexArrays(1, &m_cubeVAO);
-    glDeleteBuffers     (1, &m_cubeVBO);
-    glDeleteVertexArrays(1, &m_laserVAO);
-    glDeleteBuffers     (1, &m_laserVBO);
+    glDeleteVertexArrays(1, &m_cubeVAO);  glDeleteBuffers(1, &m_cubeVBO);
+    glDeleteVertexArrays(1, &m_laserVAO); glDeleteBuffers(1, &m_laserVBO);
 }
 
 // ── Upload cube geometry to GPU once ────────────────────────────
 void EnemyManager::setupGeometry()
 {
-    // ── Cube VAO/VBO ──
-    glGenVertexArrays(1, &m_cubeVAO);
-    glGenBuffers     (1, &m_cubeVBO);
-
-    glBindVertexArray(m_cubeVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, m_cubeVBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(CUBE_VERTS), CUBE_VERTS, GL_STATIC_DRAW);
-
-    // Attribute 0 = aPos in VERT_SRC shader
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE,
-                          3 * sizeof(float), (void*)0);
-    glEnableVertexAttribArray(0);
-    glBindVertexArray(0);
-
-    // ── Laser: same cube geometry, just scaled to a thin rod ──
-    glGenVertexArrays(1, &m_laserVAO);
-    glGenBuffers     (1, &m_laserVBO);
-    glBindVertexArray(m_laserVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, m_laserVBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(CUBE_VERTS), CUBE_VERTS, GL_STATIC_DRAW);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE,
-                          3 * sizeof(float), (void*)0);
-    glEnableVertexAttribArray(0);
-    glBindVertexArray(0);
+    auto makeVAO = [&](unsigned int& vao, unsigned int& vbo) {
+        glGenVertexArrays(1, &vao); glGenBuffers(1, &vbo);
+        glBindVertexArray(vao);
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(CUBE_VERTS), CUBE_VERTS, GL_STATIC_DRAW);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3*sizeof(float), (void*)0);
+        glEnableVertexAttribArray(0);
+        glBindVertexArray(0);
+    };
+    makeVAO(m_cubeVAO, m_cubeVBO);
+    makeVAO(m_laserVAO, m_laserVBO);
 }
 
-// ── Spawn a new enemy at a random edge position ─────────────────
-void EnemyManager::spawnEnemy()
+// ── Wave system (NEW) ────────────────────────────────────────────
+// Each wave spawns a different mix of Scout and Heavy drones.
+// Wave 1: 3 Scouts
+// Wave 2: 3 Scouts + 1 Heavy
+// Wave 3: 4 Scouts + 2 Heavies
+// Wave 4+: 3 Scouts + 3 Heavies (and they move faster each wave)
+void EnemyManager::startNextWave()
+{
+    enemies.clear();
+    waveNumber++;
+    waveComplete = false;
+
+    int scouts = 3;
+    int heavies = 0;
+
+    if (waveNumber == 2) { scouts = 3; heavies = 1; }
+    else if (waveNumber == 3) { scouts = 4; heavies = 2; }
+    else if (waveNumber >= 4) { scouts = 3; heavies = 3; }
+
+    for (int i = 0; i < scouts;  ++i) spawnEnemy(EnemyType::SCOUT);
+    for (int i = 0; i < heavies; ++i) spawnEnemy(EnemyType::HEAVY);
+}
+
+// ── Spawn a single enemy of the given type ───────────────────────
+void EnemyManager::spawnEnemy(EnemyType type)
 {
     Enemy e;
-    e.position    = randomSpawn();
-    e.active      = true;
-    e.laserActive = false;
-    e.canDamage   = false;
-    e.attackTimer = 0.0f;
-    e.respawnTimer= 0.0f;
+    e.type          = type;
+    e.position      = randomSpawn();
+    e.active        = true;
+    e.laserActive   = false;
+    e.canDamage     = false;
+    e.attackTimer   = 0.0f;
+    e.respawnTimer  = 0.0f;
+
+    if (type == EnemyType::SCOUT) {
+        e.hp    = SCOUT_HP;
+        e.maxHp = SCOUT_HP;
+        // Speed scales up with wave (faster in later waves)
+        e.speed = SCOUT_SPEED + (waveNumber - 1) * 0.3f;
+    } else {
+        e.hp    = HEAVY_HP;
+        e.maxHp = HEAVY_HP;
+        e.speed = HEAVY_SPEED + (waveNumber - 1) * 0.15f;
+    }
+
     updateBBox(e);
     enemies.push_back(e);
 }
 
-// ── Generate a random position on the edges of the terrain ──────
-glm::vec3 EnemyManager::randomSpawn()
+// ── Hit an enemy — reduce HP, return score if killed (NEW) ───────
+// Returns: score gained (0 if still alive, SCORE_SCOUT/HEAVY if killed)
+int EnemyManager::hitEnemy(Enemy& e)
 {
-    // Drones spawn in the outer ring of the map, 8–20 units from centre
-    float minD = 8.0f;
-    float maxD = TERRAIN_SIZE - 2.0f;
-    float dist = minD + static_cast<float>(rand()) /
-                 static_cast<float>(RAND_MAX) * (maxD - minD);
-
-    // Random angle around the circle
-    float angle = static_cast<float>(rand()) /
-                  static_cast<float>(RAND_MAX) * 6.28318f;  // 0..2π
-
-    float x = dist * cos(angle);
-    float z = dist * sin(angle);
-    float y = 2.5f + static_cast<float>(rand()) /
-                     static_cast<float>(RAND_MAX) * 2.0f;   // 2.5..4.5 high
-
-    return glm::vec3(x, y, z);
+    if (!e.active) return 0;
+    e.hp--;
+    if (e.hp <= 0) {
+        e.active      = false;
+        e.laserActive = false;
+        return (e.type == EnemyType::SCOUT) ? SCORE_SCOUT : SCORE_HEAVY;
+    }
+    return 0;  // still alive
 }
 
-// ── Rebuild AABB each frame ──────────────────────────────────────
+bool EnemyManager::allDead() const
+{
+    for (auto& e : enemies)
+        if (e.active) return false;
+    return true;
+}
+
+// ── Rebuild bounding box each frame ─────────────────────────────
 void EnemyManager::updateBBox(Enemy& e)
 {
-    // Drone body is drawn scaled to (1.2 × 0.5 × 1.2)
-    const glm::vec3 half(0.6f, 0.35f, 0.6f);
+    glm::vec3 half = (e.type == EnemyType::SCOUT)
+                   ? glm::vec3(0.4f, 0.25f, 0.4f)
+                   : glm::vec3(0.7f, 0.40f, 0.7f);
     e.bboxMin = e.position - half;
     e.bboxMax = e.position + half;
 }
 
-// ── Update (movement + attack timer + respawn) ───────────────────
-void EnemyManager::update(const glm::vec3& playerPos, float dt)
+// ── Random spawn position (outer ring) ──────────────────────────
+glm::vec3 EnemyManager::randomSpawn()
 {
+    float minD = 10.0f, maxD = TERRAIN_SIZE - 2.0f;
+    float dist  = minD + static_cast<float>(rand()) / RAND_MAX * (maxD - minD);
+    float angle = static_cast<float>(rand()) / RAND_MAX * 6.28318f;
+    float y     = 2.5f + static_cast<float>(rand()) / RAND_MAX * 2.0f;
+    return glm::vec3(dist*cos(angle), y, dist*sin(angle));
+}
+
+// ── Update: movement + attack + respawn ─────────────────────────
+void EnemyManager::update(const glm::vec3& playerPos, float dt, float time)
+{
+    m_currentTime = time;
+
     for (auto& e : enemies) {
-        if (!e.active) {
-            // Wait for respawn timer, then re-activate
-            e.respawnTimer += dt;
-            if (e.respawnTimer >= 3.0f) {
-                e.position     = randomSpawn();
-                e.active       = true;
-                e.laserActive  = false;
-                e.canDamage    = false;
-                e.attackTimer  = 0.0f;
-                e.respawnTimer = 0.0f;
-                updateBBox(e);
-            }
-            continue;
-        }
+        if (!e.active) continue;
 
         // ── Move toward player ────────────────────────────────────
-        // Compute direction vector from enemy to player (on X-Z plane)
         glm::vec3 dir = playerPos - e.position;
         dir.y = 0.0f;
         float dist = glm::length(dir);
-
-        // Only move if not already on top of the player
         if (dist > 0.5f) {
-            glm::vec3 normDir = dir / dist;  // normalize manually
-            e.position.x += normDir.x * ENEMY_SPEED * dt;
-            e.position.z += normDir.z * ENEMY_SPEED * dt;
+            glm::vec3 nd = dir / dist;
+            e.position.x += nd.x * e.speed * dt;
+            e.position.z += nd.z * e.speed * dt;
         }
 
-        // ── Attack countdown ──────────────────────────────────────
+        // ── Attack timer ──────────────────────────────────────────
         e.attackTimer += dt;
         e.laserActive  = false;
         e.canDamage    = false;
 
-        if (e.attackTimer >= ENEMY_ATTACK_INT) {
-            // Compute laser direction toward player (with slight random offset
-            // so the enemy doesn't have perfect aim)
+        // Heavy drones attack more frequently
+        float interval = (e.type == EnemyType::HEAVY)
+                       ? ENEMY_ATTACK_INT * 0.7f
+                       : ENEMY_ATTACK_INT;
+
+        if (e.attackTimer >= interval) {
             glm::vec3 toPlayer = playerPos - e.position;
             float d = glm::length(toPlayer);
             if (d > 0.001f) {
                 e.laserDir = toPlayer / d;
-                // Add ±0.08 random offset so not every shot hits
-                float offset = -0.08f + static_cast<float>(rand()) /
-                               static_cast<float>(RAND_MAX) * 0.16f;
-                e.laserDir.x += offset;
-                e.laserDir.y += offset * 0.5f;
+                float off  = -0.07f + static_cast<float>(rand())/RAND_MAX * 0.14f;
+                e.laserDir.x += off;
+                e.laserDir.y += off * 0.4f;
                 e.laserDir    = glm::normalize(e.laserDir);
             }
             e.laserActive = true;
             e.canDamage   = true;
-            e.attackTimer = 0.0f;  // reset timer
+            e.attackTimer = 0.0f;
         }
 
         updateBBox(e);
     }
+
+    // Check if all enemies in this wave are defeated
+    if (!waveComplete && allDead())
+        waveComplete = true;
 }
 
 // ── Draw all enemies ─────────────────────────────────────────────
 void EnemyManager::draw(unsigned int shader,
                          const glm::mat4& view,
-                         const glm::mat4& proj)
+                         const glm::mat4& proj,
+                         const glm::mat4& ortho)
 {
     for (auto& e : enemies) {
         if (!e.active) continue;
 
-        // Draw body — flat cube (teal / dark cyan colour)
-        drawCube(shader, view, proj,
-                 e.position,
-                 glm::vec3(1.2f, 0.5f, 1.2f),  // scale: wide and flat
-                 0.1f, 0.55f, 0.55f);            // teal
+        if (e.type == EnemyType::SCOUT) {
+            // Cyan flat body
+            drawCube(shader, view, proj, e.position, {0.8f, 0.3f, 0.8f}, 0.05f, 0.75f, 0.75f);
+            // White eye indicator (front)
+            drawCube(shader, view, proj,
+                     e.position + glm::vec3(0,0,-0.35f), {0.2f,0.2f,0.2f},
+                     1.0f, 1.0f, 1.0f);
+            // 4 spinning rotors
+            drawRotors(shader, view, proj, e.position, 0.55f, m_currentTime);
 
-        // Draw "eye" indicator — small orange cube slightly in front
-        glm::vec3 eyePos = e.position + glm::vec3(0.0f, 0.0f, -0.5f);
-        drawCube(shader, view, proj,
-                 eyePos,
-                 glm::vec3(0.25f, 0.25f, 0.25f),
-                 1.0f, 0.5f, 0.0f);             // orange
-
-        // Draw laser if firing
-        if (e.laserActive) {
-            drawLaser(shader, view, proj, e.position, e.laserDir);
+        } else { // HEAVY
+            // Dark red, large body
+            drawCube(shader, view, proj, e.position, {1.4f, 0.6f, 1.4f}, 0.7f, 0.1f, 0.1f);
+            // Orange eye
+            drawCube(shader, view, proj,
+                     e.position + glm::vec3(0,0,-0.65f), {0.3f,0.3f,0.3f},
+                     1.0f, 0.4f, 0.0f);
+            // Larger rotors
+            drawRotors(shader, view, proj, e.position, 0.9f, m_currentTime * 0.7f);
         }
+
+        // Red laser beam
+        if (e.laserActive)
+            drawLaser(shader, view, proj, e.position, e.laserDir);
+
+        // HP bar above the drone (NEW)
+        if (e.maxHp > 1)   // Only show for drones with more than 1 HP
+            drawHPBar(shader, ortho, view, proj, e);
     }
 }
 
 // ── Draw one cube instance ────────────────────────────────────────
-// This demonstrates the MODEL matrix in action:
-//   model = translate(identity, pos) × scale(identity, scl)
-//   MVP   = projection × view × model
 void EnemyManager::drawCube(unsigned int shader,
-                              const glm::mat4& view,
-                              const glm::mat4& proj,
-                              const glm::vec3& pos,
-                              const glm::vec3& scl,
-                              float r, float g, float b)
+                              const glm::mat4& view, const glm::mat4& proj,
+                              const glm::vec3& pos,  const glm::vec3& scl,
+                              float r, float g, float b, float a)
 {
-    // ── Build model matrix ────────────────────────────────────────
-    glm::mat4 model = glm::mat4(1.0f);               // start: identity
-    model = glm::translate(model, pos);               // move to world pos
-    model = glm::scale    (model, scl);               // scale to drone size
-
-    // MVP combines all three transforms into one matrix
-    glm::mat4 mvp = proj * view * model;
-
+    glm::mat4 model = glm::translate(glm::mat4(1.0f), pos);
+    model = glm::scale(model, scl);
     glUseProgram(shader);
-    setMVP  (shader, mvp);
-    setColor(shader, r, g, b);
-
+    setMVP(shader, proj * view * model);
+    setColor(shader, r, g, b, a);
     glBindVertexArray(m_cubeVAO);
-    glDrawArrays(GL_TRIANGLES, 0, 36);  // 36 vertices = 12 triangles = 6 faces
+    glDrawArrays(GL_TRIANGLES, 0, 36);
     glBindVertexArray(0);
 }
 
-// ── Draw a thin laser beam in the given direction ─────────────────
-// We use the same cube geometry, scaled to (0.05 × 0.05 × 15) so it
-// becomes a thin rod.  We then rotate it to point along `dir`.
-void EnemyManager::drawLaser(unsigned int shader,
-                               const glm::mat4& view,
-                               const glm::mat4& proj,
-                               const glm::vec3& from,
-                               const glm::vec3& dir)
+// ── Rotor animation (NEW) ─────────────────────────────────────────
+// Draws 4 small flat cubes at the corners of the drone body.
+// Each rotor orbits around the drone center based on game time,
+// creating the illusion of rotating blades.
+//
+// KEY CONCEPT: Using sin(time) and cos(time) on the X and Z offsets
+// makes each rotor orbit in a circle around the drone's center.
+void EnemyManager::drawRotors(unsigned int shader,
+                               const glm::mat4& view, const glm::mat4& proj,
+                               const glm::vec3& pos, float radius, float time)
 {
-    const float laserLen = 15.0f;
+    // Each rotor starts 90° apart and spins around the body
+    const float rotorSpeed = 6.0f;   // radians per second
+    float baseAngles[] = { 0.0f, 1.5708f, 3.1416f, 4.7124f }; // 0°, 90°, 180°, 270°
 
-    // Centre the laser halfway along its length
-    glm::vec3 laserCentre = from + dir * (laserLen / 2.0f);
+    for (int i = 0; i < 4; ++i) {
+        float angle = baseAngles[i] + time * rotorSpeed;
+        float rx = pos.x + radius * cos(angle);
+        float rz = pos.z + radius * sin(angle);
+        glm::vec3 rotorPos(rx, pos.y + 0.15f, rz);
 
-    // Build model matrix
-    glm::mat4 model = glm::mat4(1.0f);
-    model = glm::translate(model, laserCentre);
+        // Flat spinning disc: wide in X-Z, thin in Y
+        drawCube(shader, view, proj, rotorPos,
+                 glm::vec3(0.4f, 0.05f, 0.4f),
+                 0.85f, 0.85f, 0.85f);  // light gray rotors
+    }
+}
 
-    // Rotate from default (0,0,1) to the laser direction
-    glm::vec3 defaultFwd(0.0f, 0.0f, 1.0f);
-    glm::vec3 target = glm::normalize(dir);
-    float cosA = glm::dot(defaultFwd, target);
-    glm::vec3 axis = glm::cross(defaultFwd, target);
+// ── HP Bar above drone (NEW) ──────────────────────────────────────
+// Projects the drone's 3D position to 2D screen space, then draws
+// a health bar using the orthographic projection.
+//
+// KEY CONCEPT: 3D → 2D screen projection:
+//   clipPos = Proj × View × vec4(worldPos, 1.0)
+//   ndc      = clipPos.xyz / clipPos.w        ← perspective divide
+//   screenX  = (ndc.x + 1) / 2 * SCR_WIDTH
+//   screenY  = (ndc.y + 1) / 2 * SCR_HEIGHT
+void EnemyManager::drawHPBar(unsigned int shader, const glm::mat4& ortho,
+                               const glm::mat4& view, const glm::mat4& proj,
+                               const Enemy& e)
+{
+    // Project point 1.2 units above the drone's centre
+    glm::vec3 worldPos = e.position + glm::vec3(0.0f, 1.2f, 0.0f);
+    glm::vec4 clip = proj * view * glm::vec4(worldPos, 1.0f);
+
+    // Reject if behind the camera
+    if (clip.w <= 0.0f) return;
+
+    // Perspective divide → Normalized Device Coordinates (-1 to +1)
+    glm::vec3 ndc = glm::vec3(clip) / clip.w;
+
+    // Map NDC to pixel coordinates
+    float sx = (ndc.x + 1.0f) * 0.5f * SCR_WIDTH;
+    float sy = (ndc.y + 1.0f) * 0.5f * SCR_HEIGHT;
+
+    // Skip if off screen
+    if (sx < 0 || sx > SCR_WIDTH || sy < 0 || sy > SCR_HEIGHT) return;
+
+    // Build a small MVP for each rectangle using ortho
+    float barW = 50.0f, barH = 6.0f;
+    float bx = sx - barW * 0.5f, by = sy;
+
+    // Helper lambda to draw a rect
+    auto drawRect = [&](float x, float y, float w, float h,
+                        float r, float g, float b) {
+        glm::mat4 model = glm::scale(
+            glm::translate(glm::mat4(1.0f), glm::vec3(x, y, 0.f)),
+            glm::vec3(w, h, 1.f));
+        glUseProgram(shader);
+        setMVP(shader, ortho * model);
+        setColor(shader, r, g, b);
+        glBindVertexArray(m_cubeVAO);
+        glDrawArrays(GL_TRIANGLES, 0, 36);
+        glBindVertexArray(0);
+    };
+
+    glDisable(GL_DEPTH_TEST);
+    drawRect(bx, by, barW, barH, 0.3f, 0.0f, 0.0f);  // dark bg
+    float frac = static_cast<float>(e.hp) / e.maxHp;
+    drawRect(bx, by, barW * frac, barH, 1.0f, 0.2f, 0.2f); // red HP
+    glEnable(GL_DEPTH_TEST);
+}
+
+// ── Draw laser beam ───────────────────────────────────────────────
+void EnemyManager::drawLaser(unsigned int shader,
+                               const glm::mat4& view, const glm::mat4& proj,
+                               const glm::vec3& from, const glm::vec3& dir)
+{
+    const float len = 18.0f;
+    glm::vec3 centre = from + dir * (len * 0.5f);
+    glm::mat4 model  = glm::translate(glm::mat4(1.0f), centre);
+    glm::vec3 fwd(0,0,1);
+    glm::vec3 tgt = glm::normalize(dir);
+    float cosA = glm::dot(fwd, tgt);
+    glm::vec3 axis = glm::cross(fwd, tgt);
     if (glm::length(axis) > 0.001f) {
-        float angle = acos(glm::clamp(cosA, -1.0f, 1.0f));
+        float angle = acos(std::clamp(cosA, -1.0f, 1.0f));
         model = glm::rotate(model, angle, glm::normalize(axis));
     }
-
-    // Scale: very thin in x/y, long in z
-    model = glm::scale(model, glm::vec3(0.06f, 0.06f, laserLen));
-
-    glm::mat4 mvp = proj * view * model;
+    model = glm::scale(model, {0.06f, 0.06f, len});
 
     glUseProgram(shader);
-    setMVP  (shader, mvp);
-    setColor(shader, 1.0f, 0.1f, 0.1f);  // bright red laser
-
+    setMVP(shader, proj * view * model);
+    setColor(shader, 1.0f, 0.1f, 0.1f);
     glBindVertexArray(m_laserVAO);
     glDrawArrays(GL_TRIANGLES, 0, 36);
     glBindVertexArray(0);
 }
 
-// ── Reset for a new game ─────────────────────────────────────────
+// ── Reset ────────────────────────────────────────────────────────
 void EnemyManager::reset()
 {
     enemies.clear();
-    for (int i = 0; i < MAX_ENEMIES; ++i)
-        spawnEnemy();
+    waveNumber   = 0;
+    waveComplete = false;
+    startNextWave();
 }

@@ -1,16 +1,5 @@
 // ================================================================
-// main.cpp  —  Entry Point & Game Loop
-// This file assembles all 5 components into a working game.
-// ================================================================
-//  FLOW:
-//    1. Member 1 (GLFWWindow)         → create window + load OpenGL
-//    2. Compile shader                → shared GPU program
-//    3. Member 2 (Player)             → camera, movement
-//    4. Member 3 (EnemyManager)       → drones
-//    5. Member 4 (CollisionDetector)  → hit detection
-//    6. Member 5 (HUD)                → overlay UI
-//    7. Ground quad (local setup)     → simple flat floor
-//    8. GAME LOOP: input → update → draw → swap
+// main.cpp — Entry Point & Game Loop (UPGRADED)
 // ================================================================
 
 #include "glfw_window.h"
@@ -25,187 +14,229 @@
 #include <GLFW/glfw3.h>
 #include <iostream>
 
-// ── Ground Quad setup (simple flat floor) ───────────────────────
-// We set this up once in main because it belongs to no single class.
-static unsigned int g_groundVAO = 0;
-static unsigned int g_groundVBO = 0;
+// ── Ground Quad ──────────────────────────────────────────────────
+static unsigned int g_groundVAO = 0, g_groundVBO = 0;
 
 void setupGround()
 {
-    float T = TERRAIN_SIZE;   // half-size of terrain
-    float groundY = -0.05f;   // just below ground level
-
-    // Six vertices = two triangles = one flat rectangle (XZ plane)
+    float T = TERRAIN_SIZE, Y = -0.05f;
     float verts[] = {
-        -T, groundY,  T,   // front-left
-         T, groundY,  T,   // front-right
-         T, groundY, -T,   // back-right
-
-         T, groundY, -T,   // back-right
-        -T, groundY, -T,   // back-left
-        -T, groundY,  T,   // front-left
+        -T,Y, T,   T,Y, T,   T,Y,-T,
+         T,Y,-T,  -T,Y,-T,  -T,Y, T,
     };
-
-    glGenVertexArrays(1, &g_groundVAO);
-    glGenBuffers     (1, &g_groundVBO);
+    glGenVertexArrays(1, &g_groundVAO); glGenBuffers(1, &g_groundVBO);
     glBindVertexArray(g_groundVAO);
     glBindBuffer(GL_ARRAY_BUFFER, g_groundVBO);
     glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_STATIC_DRAW);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE,
-                          3 * sizeof(float), (void*)0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3*sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
     glBindVertexArray(0);
 }
 
 void drawGround(unsigned int shader,
-                const glm::mat4& view,
-                const glm::mat4& proj)
+                const glm::mat4& view, const glm::mat4& proj)
 {
-    // Model matrix = identity (ground is already in world space)
-    glm::mat4 model = glm::mat4(1.0f);
-    glm::mat4 mvp   = proj * view * model;
-
+    glm::mat4 mvp = proj * view * glm::mat4(1.0f);
     glUseProgram(shader);
-    setMVP  (shader, mvp);
-    setColor(shader, 0.28f, 0.52f, 0.26f);  // dark grass green
-
+    setMVP(shader, mvp);
+    setColor(shader, 0.22f, 0.45f, 0.20f);  // dark grass green
     glBindVertexArray(g_groundVAO);
     glDrawArrays(GL_TRIANGLES, 0, 6);
+    glBindVertexArray(0);
+}
+
+// ── Terrain boundary walls (visible edges of the play area) ──────
+static unsigned int g_wallVAO = 0, g_wallVBO = 0;
+
+void setupWalls()
+{
+    float T = TERRAIN_SIZE, H = 4.0f; // wall height
+    // 4 walls as thin flat quads at terrain edge
+    float verts[] = {
+        // North wall (z = -T)
+        -T, -0.05f,-T,   T, -0.05f,-T,   T,H,-T,
+         T, H,     -T,  -T, H,     -T,  -T, -0.05f,-T,
+        // South wall (z = +T)
+        -T, -0.05f, T,   T,H, T,   T, -0.05f, T,
+        -T, -0.05f, T,  -T,H, T,   T, H, T,
+        // West wall (x = -T)
+        -T, -0.05f,-T,  -T,H,-T,  -T, -0.05f, T,
+        -T, H,-T,        -T, H, T, -T, -0.05f, T,
+        // East wall (x = +T)
+         T, -0.05f,-T,   T, -0.05f, T,  T,H,-T,
+         T, H,-T,         T, -0.05f, T,  T, H, T,
+    };
+    glGenVertexArrays(1, &g_wallVAO); glGenBuffers(1, &g_wallVBO);
+    glBindVertexArray(g_wallVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, g_wallVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3*sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glBindVertexArray(0);
+}
+
+void drawWalls(unsigned int shader,
+               const glm::mat4& view, const glm::mat4& proj)
+{
+    glm::mat4 mvp = proj * view * glm::mat4(1.0f);
+    glUseProgram(shader);
+    setMVP(shader, mvp);
+    setColor(shader, 0.35f, 0.28f, 0.18f);  // earthy brown walls
+    glBindVertexArray(g_wallVAO);
+    glDrawArrays(GL_TRIANGLES, 0, 24);
     glBindVertexArray(0);
 }
 
 // ── main ─────────────────────────────────────────────────────────
 int main()
 {
-    // ── 1. Create window (Member 1) ───────────────────────────────
-    GLFWWindow win(SCR_WIDTH, SCR_HEIGHT, "Drone Shooter  [SIMPLE]");
-
-    // ── 2. Compile shader (shared by all members) ─────────────────
-    unsigned int shader = createShaderProgram();
-
-    // ── 3. Player / camera (Member 2) ────────────────────────────
-    Player player;
-
-    // ── 4. Enemy manager (Member 3) ───────────────────────────────
-    EnemyManager enemies;
-
-    // ── 5. Collision detector (Member 4) ──────────────────────────
+    GLFWWindow       win(SCR_WIDTH, SCR_HEIGHT, "Drone Shooter [UPGRADED]");
+    unsigned int     shader = createShaderProgram();
+    Player           player;
+    EnemyManager     enemies;
     CollisionDetector collision;
+    HUD              hud;
 
-    // ── 6. HUD (Member 5) ─────────────────────────────────────────
-    HUD hud;
-
-    // ── 7. Ground geometry ────────────────────────────────────────
     setupGround();
+    setupWalls();
 
-    // ── 8. Game state ─────────────────────────────────────────────
-    GameState state = GameState::START;
+    GameState state        = GameState::START;
+    float     wavePauseT   = 0.0f;  // time elapsed since WAVE_END began
+    bool      bannerShown  = false;  // is wave banner currently visible
 
-    std::cout << "\n";
-    std::cout << "=== DRONE SHOOTER (SIMPLIFIED) ===\n";
-    std::cout << "  WASD       - Move\n";
-    std::cout << "  Mouse      - Look around\n";
-    std::cout << "  SPACE      - Shoot\n";
-    std::cout << "  ENTER      - Start / Restart\n";
-    std::cout << "  ESC        - Quit\n";
-    std::cout << "==================================\n\n";
+    std::cout << "\n=== DRONE SHOOTER (UPGRADED) ===\n"
+              << "  WASD      Move     |  SHIFT  Sprint\n"
+              << "  Mouse     Look     |  SPACE  Shoot\n"
+              << "  R         Reload   |  ESC    Quit\n"
+              << "  ENTER     Start / Restart\n"
+              << "================================\n\n";
 
-    // ── 9. Game Loop ──────────────────────────────────────────────
     while (!win.shouldClose())
     {
         float dt   = win.getDeltaTime();
         float time = static_cast<float>(glfwGetTime());
 
-        // ── Clear the screen (sky blue background) ────────────────
-        glClearColor(0.53f, 0.81f, 0.98f, 1.0f);
+        // Sky colour shifts slightly warmer in later waves
+        float waveHeat = std::min((enemies.waveNumber - 1) * 0.03f, 0.15f);
+        glClearColor(0.53f - waveHeat, 0.81f - waveHeat, 0.98f - waveHeat*2, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         // ──────────────────────────────────────────────────────────
-        //  STATE: START — show title screen, wait for ENTER
-        // ──────────────────────────────────────────────────────────
         if (state == GameState::START)
         {
-            // Draw a minimal 3D view behind the overlay
             auto view = player.getViewMatrix();
             auto proj = player.getProjMatrix();
             drawGround(shader, view, proj);
 
-            // Member 5: draw start screen overlay
             hud.drawStartScreen(shader, player.getOrthoMatrix(), time);
 
-            if (glfwGetKey(win.handle, GLFW_KEY_ENTER) == GLFW_PRESS)
+            if (glfwGetKey(win.handle, GLFW_KEY_ENTER) == GLFW_PRESS) {
                 state = GameState::PLAYING;
-        }
-
-        // ──────────────────────────────────────────────────────────
-        //  STATE: PLAYING — full game
-        // ──────────────────────────────────────────────────────────
-        else if (state == GameState::PLAYING)
-        {
-            // Member 2: handle keyboard + mouse
-            player.processInput(win.handle, dt);
-            player.processMouse(win.handle);
-
-            // Member 3: move and update enemies
-            enemies.update(player.position, dt);
-
-            // Member 4: check bullet and laser collisions
-            collision.detect(player, enemies);
-
-            // ── 3D scene rendering ────────────────────────────────
-            auto view = player.getViewMatrix();
-            auto proj = player.getProjMatrix();
-
-            drawGround (shader, view, proj);       // static floor
-            enemies.draw(shader, view, proj);       // Member 3 draws drones
-
-            // ── 2D HUD rendering (depth test off) ─────────────────
-            auto ortho = player.getOrthoMatrix();
-            player.drawCrosshair(shader);           // Member 2: crosshair
-            player.drawGunBar   (shader);           // Member 2: gun rect
-            hud.drawHealthBar   (shader, ortho, player.health);   // Member 5
-            hud.drawKillMarkers (shader, ortho, player.kills);    // Member 5
-
-            // ── Transition to DEAD if health runs out ─────────────
-            if (player.health <= 0.0f)
-            {
-                state = GameState::DEAD;
                 enemies.reset();
             }
         }
 
         // ──────────────────────────────────────────────────────────
-        //  STATE: DEAD — game over screen
+        else if (state == GameState::PLAYING)
+        {
+            // ── Update ───────────────────────────────────────────
+            player.processInput(win.handle, dt);
+            player.processMouse(win.handle);
+            player.updateTimers(dt);               // ammo reload, flash, etc.
+
+            enemies.update(player.position, dt, time);
+
+            int earned = collision.detect(player, enemies);
+            (void)earned;  // score is added inside collision via player.score
+
+            // Check wave complete
+            if (enemies.waveComplete) {
+                state      = GameState::WAVE_END;
+                wavePauseT = 0.0f;
+                bannerShown = true;
+            }
+
+            // Check game over
+            if (player.health <= 0.0f)
+                state = GameState::DEAD;
+
+            // ── 3D Render ────────────────────────────────────────
+            auto view  = player.getViewMatrix();
+            auto proj  = player.getProjMatrix();
+            auto ortho = player.getOrthoMatrix();
+
+            drawGround(shader, view, proj);
+            drawWalls(shader, view, proj);
+            enemies.draw(shader, view, proj, ortho);  // draws drones + HP bars
+
+            // ── 2D HUD ───────────────────────────────────────────
+            glDisable(GL_DEPTH_TEST);
+
+            // Danger ring (pulsing edge when enemy is close)
+            float nearDist = collision.distToClosestEnemy(player, enemies);
+            hud.drawDangerRing(shader, ortho, nearDist, time);
+
+            player.drawGunBar   (shader);
+            player.drawCrosshair(shader);
+            player.drawMuzzleFlash(shader);
+
+            hud.drawHealthBar (shader, ortho, player.health);
+            hud.drawAmmoBar   (shader, ortho, player.ammo, MAX_AMMO, player.reloading);
+            hud.drawScore     (shader, ortho, player.score);
+            hud.drawMiniRadar (shader, ortho, player.position, enemies.enemies);
+
+            glEnable(GL_DEPTH_TEST);
+        }
+
+        // ──────────────────────────────────────────────────────────
+        else if (state == GameState::WAVE_END)
+        {
+            // Freeze gameplay, show wave banner
+            auto view  = player.getViewMatrix();
+            auto proj  = player.getProjMatrix();
+            auto ortho = player.getOrthoMatrix();
+
+            drawGround(shader, view, proj);
+            drawWalls (shader, view, proj);
+            // Draw remaining scenery
+            enemies.draw(shader, view, proj, ortho);
+
+            hud.drawWaveBanner(shader, ortho, enemies.waveNumber, wavePauseT);
+
+            wavePauseT += dt;
+            if (wavePauseT >= WAVE_PAUSE) {
+                enemies.startNextWave();           // spawn next wave
+                state      = GameState::PLAYING;
+                bannerShown = false;
+            }
+        }
+
         // ──────────────────────────────────────────────────────────
         else if (state == GameState::DEAD)
         {
-            // Draw frozen 3D view in background
-            auto view = player.getViewMatrix();
-            auto proj = player.getProjMatrix();
+            auto view  = player.getViewMatrix();
+            auto proj  = player.getProjMatrix();
+            auto ortho = player.getOrthoMatrix();
+
             drawGround(shader, view, proj);
+            hud.drawGameOverScreen(shader, ortho, player.score, player.kills, time);
 
-            // Member 5: draw game over overlay
-            hud.drawGameOverScreen(shader, player.getOrthoMatrix(),
-                                   player.kills, time);
-
-            // ENTER = restart
-            if (glfwGetKey(win.handle, GLFW_KEY_ENTER) == GLFW_PRESS)
-            {
+            if (glfwGetKey(win.handle, GLFW_KEY_ENTER) == GLFW_PRESS) {
                 player.reset();
                 enemies.reset();
                 state = GameState::PLAYING;
             }
         }
 
-        // End of frame: display and poll events (Member 1)
         win.swapAndPoll();
     }
 
-    // Cleanup
-    glDeleteVertexArrays(1, &g_groundVAO);
-    glDeleteBuffers(1, &g_groundVBO);
+    glDeleteVertexArrays(1, &g_groundVAO); glDeleteBuffers(1, &g_groundVBO);
+    glDeleteVertexArrays(1, &g_wallVAO);   glDeleteBuffers(1, &g_wallVBO);
     glDeleteProgram(shader);
 
-    std::cout << "Game closed. Final kills: " << player.kills << "\n";
+    std::cout << "Final score: " << player.score
+              << "  Kills: " << player.kills
+              << "  Wave reached: " << enemies.waveNumber << "\n";
     return 0;
 }

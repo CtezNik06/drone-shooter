@@ -1,79 +1,74 @@
 #pragma once
 
 // ================================================================
-// MEMBER 5: hud.h  —  HUD & Game State
-// ================================================================
-// YOUR JOB:
-//   • Draw the health bar (2 rectangles) in 2D screen space
-//   • Draw kill markers (small squares — one per kill)
-//   • Draw the START screen overlay (before game begins)
-//   • Draw the GAME OVER screen overlay (when player dies)
-//   • All drawing uses the orthographic projection from Player
-//
-// KEY CONCEPTS TO EXPLAIN (when presenting):
-//   1. Orthographic Projection (2D rendering)
-//      Unlike the 3D perspective projection, ortho maps pixel
-//      coordinates (0..800, 0..600) directly to the screen with
-//      no depth distortion.  Used for all UI elements.
-//
-//   2. HUD (Heads-Up Display)
-//      The 2D overlay drawn on top of the 3D scene.
-//      We draw 2D shapes AFTER the 3D scene using depth test OFF.
-//
-//   3. Game State Machine
-//      The game is in exactly one state at a time:
-//        START → PLAYING (press ENTER)
-//        PLAYING → DEAD  (health reaches 0)
-//        DEAD → PLAYING  (press ENTER to restart)
-//
-//   4. Alpha Blending (semi-transparent overlays)
-//      We enable GL_BLEND so our overlay quads can be translucent.
-//      Formula: output = src_alpha * src + (1-src_alpha) * dst
+// MEMBER 5 (UPGRADED): hud.h
+// NEW FEATURES:
+//   • Ammo bar       — shows remaining bullets (10 slots)
+//   • Score display  — animated score bar
+//   • Wave banner    — "WAVE N" announcement at wave start
+//   • Danger ring    — pulsing red outline when enemy is close
+//   • Mini-radar     — top-right map showing enemy positions
+//   • Segmented HP   — health bar split into 5 segments
 // ================================================================
 
 #include <glad/glad.h>
 #include <glm/glm.hpp>
 #include "game_state.h"
+#include "enemy.h"    // needed for mini-radar (reads enemy positions)
+#include <vector>
 
 class HUD {
 public:
     HUD();
     ~HUD();
 
-    // Draw the health bar at the top-left of the screen.
-    // health = current health (0..100).  Below 30 it turns red.
+    // ── In-game HUD elements ─────────────────────────────────────
+
+    // Segmented health bar (5 segments, each = 20 HP)
     void drawHealthBar(unsigned int shader,
+                       const glm::mat4& ortho, float health);
+
+    // Ammo slots: white = loaded, dark = empty, orange = reloading
+    void drawAmmoBar(unsigned int shader,
+                     const glm::mat4& ortho,
+                     int ammo, int maxAmmo, bool reloading);
+
+    // Score display: a white bar whose width grows with score
+    void drawScore(unsigned int shader,
+                   const glm::mat4& ortho, int score);
+
+    // Mini-radar (top-right): player dot at centre, enemies as dots
+    void drawMiniRadar(unsigned int shader,
                        const glm::mat4& ortho,
-                       float health);
+                       const glm::vec3& playerPos,
+                       const std::vector<Enemy>& enemies);
 
-    // Draw one small colored square for each kill (tally markers).
-    void drawKillMarkers(unsigned int shader,
-                         const glm::mat4& ortho,
-                         int kills);
+    // Pulsing red border when an enemy is within dangerDist units
+    void drawDangerRing(unsigned int shader,
+                        const glm::mat4& ortho,
+                        float dangerDist,   // distance to closest enemy
+                        float time);
 
-    // START SCREEN: semi-transparent dark overlay + pulsing green bar
-    // (player should press ENTER to start)
-    void drawStartScreen(unsigned int shader,
-                         const glm::mat4& ortho,
-                         float time);
+    // Wave announcement banner (shown for wavePause seconds)
+    void drawWaveBanner(unsigned int shader,
+                        const glm::mat4& ortho,
+                        int waveNumber, float time);
 
-    // GAME OVER: semi-transparent red overlay + white bar showing score
-    void drawGameOverScreen(unsigned int shader,
-                            const glm::mat4& ortho,
-                            int kills,
-                            float time);
+    // ── Full-screen overlay screens ──────────────────────────────
+    void drawStartScreen   (unsigned int shader, const glm::mat4& ortho, float time);
+    void drawGameOverScreen(unsigned int shader, const glm::mat4& ortho, int score, int kills, float time);
 
 private:
-    // VAO/VBO for a single reusable rectangle (we transform it each use)
     unsigned int m_quadVAO, m_quadVBO;
-
     void setupQuad();
 
-    // Draws a filled rectangle at (x,y) with width w and height h.
-    // Uses the orthographic projection matrix `ortho`.
-    // r, g, b, a = color including alpha
-    void drawRect(unsigned int shader,
-                  const glm::mat4& ortho,
+    // Core primitive: draw a filled rectangle in 2D pixel space
+    void drawRect(unsigned int shader, const glm::mat4& ortho,
                   float x, float y, float w, float h,
                   float r, float g, float b, float a = 1.0f);
+
+    // Draw a hollow rectangle border (4 thin rects)
+    void drawBorder(unsigned int shader, const glm::mat4& ortho,
+                    float x, float y, float w, float h, float thickness,
+                    float r, float g, float b, float a = 1.0f);
 };
