@@ -12,12 +12,12 @@ set(SOURCES
     enemy.cpp           # Member 3 – Enemy AI & Rendering
     collision.cpp       # Member 4 – Collision Detection
     hud.cpp             # Member 5 – HUD & Game State
-    ../src/glad.c       # OpenGL loader (reused from parent project)
+    glad.c       # OpenGL loader (reused from parent project)
 )
 
 # ── Reuse the include headers already in the parent project ──────
 #  glad/, glm/, GLFW/, KHR/ are all there
-include_directories(../include)
+include_directories(include)
 
 # ── Find GLFW (already installed as part of the parent project) ──
 find_package(PkgConfig REQUIRED)
