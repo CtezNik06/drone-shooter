@@ -1,3 +1,0 @@
-/Users/tanushv/cg/drone-shooter/build/CMakeFiles/DroneShooterSimple.dir
-/Users/tanushv/cg/drone-shooter/build/CMakeFiles/edit_cache.dir
-/Users/tanushv/cg/drone-shooter/build/CMakeFiles/rebuild_cache.dir
